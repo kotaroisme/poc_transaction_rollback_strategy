@@ -1,3 +1,52 @@
+# Payment Transaction with Rollback
+
+This project implements a `Payment` class that manages the payment transaction flow with structured steps, including a rollback mechanism if any step fails. 
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Directory Structure](#directory-structure)
+- [Payment Class Structure](#payment-class-structure)
+   - [Transaction Steps](#transaction-steps)
+   - [Rollback Mechanism](#rollback-mechanism)
+- [Usage](#usage)
+- [Testing](#testing)
+- [Execution Examples](#execution-examples)
+- [License](#license)
+
+
+## Main Features
+
+- **Payment Validation**: Ensures payment details are valid before processing.
+- **Payment Processing**: Processes the payment transaction and generates a `transaction_id`.
+- **Send Confirmation**: Sends a confirmation email after a successful payment.
+- **Rollback Mechanism**: If any step fails, the system rolls back the previously executed steps.
+- **Automated Testing**: Uses RSpec to ensure all functions work as expected.
+
+## Prerequisites
+
+Make sure you have installed:
+
+- Ruby (version 3.x or later)
+- Bundler (`gem install bundler`)
+
+## Installation
+
+1. **Clone this repository** or copy the code into your project directory.
+
+2. **Navigate to the project directory**:
+
+   ```bash
+   cd your-project-directory
+   ```
+
+3. **Install dependencies** with Bundler:
+
+   ```bash
+   bundle install
+   ```
+
 ## Directory Structure
 ```sh
 - poc_transaction_rollback_strategy
@@ -7,88 +56,161 @@
   -- Gemfile.lock
 ```
 
-##  Setup
+## Payment Class Structure
 
-1. **Clone or Navigate to the Project Folder**
+The `Payment` class manages the payment transaction flow through three main steps:
 
-   Make sure you are in the `poc_transaction_rollback_strategy` folder where all the application files are located.
+### Transaction Steps
 
-2. **Install Dependencies with Bundler**
+1. **`validate_payment`**: Validates payment details like `amount` and `account_id`.
+2. **`process_payment`**: Processes the payment and generates a `transaction_id`.
+3. **`send_confirmation`**: Sends a confirmation email to the user.
 
-   Bundler is used to manage the gems required by the application. Make sure you have bundler installed, if not, install it with:
-   ```sh
-   gem install bundler
+### Rollback Mechanism
+
+If any step fails, the `rollback!` method is called to undo the previously executed steps. Rollback is performed in reverse order of the executed steps.
+
+Available rollback methods:
+
+- `rollback_send_confirmation`
+- `rollback_process_payment`
+- `rollback_validate_payment`
+
+## Usage
+
+Here's an example of how to use the `Payment` class:
+
+```ruby
+require_relative 'payment'
+
+payment = Payment.new
+
+input = {
+  amount: 100,
+  account_id: 'acc_456'
+}
+
+result = payment.call(input)
+
+if result.success?
+  puts "Payment successful with Transaction ID: #{payment.transaction_id}"
+else
+  puts "Payment failed due to: #{result.failure}"
+end
+```
+
+**Note**: You can force a failure in the payment or confirmation step by setting the `force_fail_payment` or `force_fail_confirmation` attribute to `true`:
+
+```ruby
+payment.force_fail_payment = true
+payment.force_fail_confirmation = true
+```
+
+## Testing
+
+Testing is conducted using RSpec. The tests cover the following scenarios:
+
+- Successful payment without any failures.
+- Failure during the payment validation step.
+- Failure during the payment processing step.
+- Failure during the confirmation sending step.
+- Testing the rollback mechanism.
+
+### Running the Tests
+
+1. Ensure you are in the project directory.
+
+2. Run the following command:
+
+   ```bash
+   rspec
    ```
 
-3. **Install Dependencies**
+3. You will see the test output, indicating whether all tests pass or if any fail.
 
-   Once `bundler` is installed, run the following command to install all required dependencies based on the `Gemfile`:
-   ```sh
-   bundle install
-   ```
+**Sample Output**:
 
-## Running Code with IRB
+```
+Payment
+  #call
+    when payment is successful
+      processes the payment and sends confirmation
+    when validation fails
+      fails and rolls back validation
+    when payment processing fails
+      fails and rolls back processed steps
+    when sending confirmation fails
+      fails and rolls back all steps
+  #rollback!
+    calls the appropriate rollback methods in reverse order
 
-1. **Open IRB**
+Finished in 0.02345 seconds (files took 0.16543 seconds to load)
+5 examples, 0 failures
+```
 
-   IRB is the Interactive Ruby Shell that can be used to run Ruby code directly in the terminal. To open IRB, type:
-   ```sh
-   irb
-   ```
+## Execution Examples
 
-2. **Load `payment.rb` File into IRB**
+Below are some execution examples and the output they produce:
 
-   After IRB is open, load the `payment.rb` file so that it can be used in IRB:
-   ```ruby
-   require_relative 'payment'
-   ```
+### 1. Successful Payment
 
-3. **Create an Instance and Execute a Transaction**
+```ruby
+payment = Payment.new
+input = { amount: 100, account_id: 'acc_456' }
+result = payment.call(input)
+```
 
-   After successfully loading the `payment.rb` file, you can create an instance of the `Payment` class and execute a transaction using `Dry::Matcher::ResultMatcher`, for example:
-   ```ruby
-   transaction = Payment.new
-   result = transaction.call(account_id: 1, amount: 100)
+**Output**:
 
-   # Check the result of the transaction using Dry::Matcher::ResultMatcher
-   Dry::Matcher::ResultMatcher.call(result) do |m|
-     m.success do |value|
-       puts "Transaction successful: #{value}"
-     end
+```
+Confirmation email sent for Transaction ID: txn_123
+Payment successful with Transaction ID: txn_123
+```
 
-     m.failure do |error|
-       puts "Transaction failed: #{error}"
-     end
-   end
-   transaction = Payment.new
-   result = transaction.call(account_id: 1, amount: 100)
-   
-   # Check the result of the transaction
-   if result.success?
-     puts "Transaction successful: #{result.value!}"
-   else
-     puts "Transaction failed: #{result.failure}"
-   end
-   ```
+### 2. Payment Validation Failure
 
-## Running RSpec
+```ruby
+payment = Payment.new
+input = { amount: 0, account_id: nil }
+result = payment.call(input)
+```
 
-1. **Ensure RSpec is Installed**
+**Output**:
 
-   RSpec is a gem for testing in Ruby. Make sure it is installed via `bundle install`. If not, add `rspec` to the `Gemfile` and run:
-   ```sh
-   bundle install
-   ```
+```
+Rollback: Cancelled payment validation due to invalid_payment_details.
+Payment failed due to: invalid_payment_details
+```
 
-2. **Run Tests with RSpec**
+### 3. Payment Processing Failure
 
-   To run the tests in `payment_spec.rb`, use the following command:
-   ```sh
-   bundle exec rspec payment_spec.rb
-   ```
-   This command will run all the test cases in the `payment_spec.rb` file and display the results in the terminal.
+```ruby
+payment = Payment.new
+payment.force_fail_payment = true
+input = { amount: 100, account_id: 'acc_456' }
+result = payment.call(input)
+```
 
-## Additional Notes
+**Output**:
 
-- Make sure all files (`payment.rb` and `payment_spec.rb`) are in the same directory.
-- If any errors occur during installation or while running the code, ensure that all required gems or libraries are installed and listed in the `Gemfile`.
+```
+Rollback: Cancelled payment validation due to payment_failed.
+Payment failed due to: payment_failed
+```
+
+### 4. Confirmation Sending Failure
+
+```ruby
+payment = Payment.new
+payment.force_fail_confirmation = true
+input = { amount: 100, account_id: 'acc_456' }
+result = payment.call(input)
+```
+
+**Output**:
+
+```
+Rollback: Refunded amount to account_id due to confirmation_failed.
+Rollback: Cancelled payment validation due to confirmation_failed.
+Payment failed due to: confirmation_failed
+```

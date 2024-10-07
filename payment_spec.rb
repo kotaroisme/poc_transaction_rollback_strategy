@@ -3,87 +3,69 @@ require 'dry/matcher/result_matcher' # Import Dry::Matcher buat matching hasil t
 require 'dry/monads' # Import Dry::Monads buat handle Success dan Failure
 require_relative 'payment' # Import kelas Payment dari file lokal
 
-describe Payment do
-  include Dry::Monads[:result, :do] # Include Dry::Monads biar bisa pake Success dan Failure
-  let(:transaction) { Payment.new } # Bikin instance dari kelas Payment
+RSpec.describe Payment do
+  let(:valid_input) { { amount: 100, account_id: 'acc_456' } }
+  let(:invalid_input) { { amount: 0, account_id: nil } }
+  let(:payment) { Payment.new }
 
-  # Test case buat transaksi yang berhasil
-  context 'when the transaction is successful' do
-    let(:input) { { account_id: 1, amount: 100 } } # Input valid buat transaksi yang berhasil
+  describe '#call' do
+    context 'when payment is successful' do
+      it 'processes the payment and sends confirmation' do
+        expect { payment.call(valid_input) }.to output(/Confirmation email sent for Transaction ID: txn_123/).to_stdout
 
-    it 'returns a success result' do
-      result = transaction.call(input) # Panggil transaksi dengan input valid
+        expect(payment.transaction_id).to eq('txn_123')
+        expect(payment.instance_variable_get(:@executed_steps)).to eq([:validate_payment, :process_payment, :send_confirmation])
+      end
+    end
 
-      Dry::Matcher::ResultMatcher.call(result) do |m| # Match hasilnya pake Dry::Matcher
-        m.success do |value| # Kalau sukses, cek hasilnya
-          expect(value[:transaction_id]).to_not be_nil # Pastikan transaction ID nggak kosong
-          expect(value[:account_id]).to eq(input[:account_id]) # Pastikan account ID sesuai dengan input
-          expect(value[:amount]).to eq(input[:amount]) # Pastikan amount sesuai dengan input
-        end
+    context 'when validation fails' do
+      it 'fails and rolls back validation' do
+        result = payment.call(invalid_input)
 
-        m.failure do |error| # Kalau gagal, lempar error
-          raise "Expected success but got failure: #{error}"
-        end
+        expect(result).to be_failure
+        expect(result.failure).to eq(:invalid_payment_details)
+        expect(payment.instance_variable_get(:@executed_steps)).to be_empty
+      end
+    end
+
+    context 'when payment processing fails' do
+      it 'fails and rolls back processed steps' do
+        payment.force_fail_payment = true
+
+        expect {
+          result = payment.call(valid_input)
+
+          expect(result).to be_failure
+          expect(result.failure).to eq(:payment_failed)
+          expect(payment.instance_variable_get(:@executed_steps)).to eq([:validate_payment])
+        }.to output(/Rollback: Membatalkan validasi pembayaran karena payment_failed./).to_stdout
+      end
+    end
+
+    context 'when sending confirmation fails' do
+      it 'fails and rolls back all steps' do
+        payment.force_fail_confirmation = true
+
+        expect {
+          result = payment.call(valid_input)
+
+          expect(result).to be_failure
+          expect(result.failure).to eq(:confirmation_failed)
+          expect(payment.instance_variable_get(:@executed_steps)).to eq([:validate_payment, :process_payment])
+        }.to output(/Rollback: Mengembalikan dana untuk account_id karena confirmation_failed.\nRollback: Membatalkan validasi pembayaran karena confirmation_failed./).to_stdout
       end
     end
   end
 
-  # Test case buat validasi gagal
-  context 'when the validation fails' do
-    let(:input) { { account_id: nil, amount: 100 } } # Input nggak valid buat uji validasi gagal
+  describe '#rollback!' do
+    it 'calls the appropriate rollback methods in reverse order' do
+      payment.instance_variable_set(:@executed_steps, [:validate_payment, :process_payment, :send_confirmation])
 
-    it 'returns a failure result with :invalid_payment_details' do
-      result = transaction.call(input) # Panggil transaksi dengan input yang nggak valid
+      expect(payment).to receive(:rollback_send_confirmation).with(:some_failure).ordered
+      expect(payment).to receive(:rollback_process_payment).with(:some_failure).ordered
+      expect(payment).to receive(:rollback_validate_payment).with(:some_failure).ordered
 
-      Dry::Matcher::ResultMatcher.call(result) do |m| # Match hasilnya pake Dry::Matcher
-        m.success do |_| # Kalau sukses, harusnya error
-          raise 'Expected failure but got success'
-        end
-
-        m.failure do |error| # Kalau gagal, cek alasannya
-          expect(error).to eq(:invalid_payment_details) # Pastikan alasan gagalnya :invalid_payment_details
-        end
-      end
-    end
-  end
-
-  # Test case buat kegagalan proses pembayaran
-  context 'when the payment processing fails' do
-    let(:input) { { account_id: 1, amount: 100 } } # Input buat simulasi kegagalan proses pembayaran
-
-    it 'returns a failure result with :payment_failed' do
-      allow(transaction).to receive(:call).and_return(Failure(:payment_failed)) # Stub metode call buat balikin failure
-      result = transaction.call(input) # Panggil transaksi dengan input
-
-      Dry::Matcher::ResultMatcher.call(result) do |m| # Match hasilnya pake Dry::Matcher
-        m.success do |_| # Kalau sukses, harusnya error
-          raise 'Expected failure but got success'
-        end
-
-        m.failure do |error| # Kalau gagal, cek alasannya
-          expect(error).to eq(:payment_failed) # Pastikan alasan gagalnya :payment_failed
-        end
-      end
-    end
-  end
-
-  # Test case buat kegagalan email konfirmasi
-  context 'when the confirmation email fails' do
-    let(:input) { { account_id: 1, amount: 100 } } # Input buat simulasi kegagalan email konfirmasi
-
-    it 'returns a failure result with :confirmation_failed' do
-      allow(transaction).to receive(:call).and_return(Failure(:confirmation_failed)) # Stub metode call buat balikin failure
-      result = transaction.call(input) # Panggil transaksi dengan input
-
-      Dry::Matcher::ResultMatcher.call(result) do |m| # Match hasilnya pake Dry::Matcher
-        m.success do |_| # Kalau sukses, harusnya error
-          raise 'Expected failure but got success'
-        end
-
-        m.failure do |error| # Kalau gagal, cek alasannya
-          expect(error).to eq(:confirmation_failed) # Pastikan alasan gagalnya :confirmation_failed
-        end
-      end
+      payment.rollback!(:some_failure)
     end
   end
 end
